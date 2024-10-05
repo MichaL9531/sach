@@ -1,0 +1,237 @@
+﻿<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ultimate Šachová hra</title>
+  <link rel="stylesheet" href="https://unpkg.com/chessboard-js@1.0.0/css/chessboard-1.0.0.min.css">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #2c3e50;
+      color: white;
+      font-family: 'Helvetica Neue', sans-serif;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+      color: #ecf0f1;
+    }
+
+    #status {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #ecf0f1;
+    }
+
+    #timer {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #ecf0f1;
+    }
+
+    #board {
+      margin-bottom: 20px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #e74c3c;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #c0392b;
+    }
+
+    button:disabled {
+      background-color: #7f8c8d;
+      cursor: not-allowed;
+    }
+
+    /* Pre mobilné zariadenia */
+    @media (max-width: 768px) {
+      #board {
+        width: 300px !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Zahraj si šach s AI</h1>
+  <div id="status">Biely na ťahu</div>
+  <div id="timer">Biely: <span id="whiteTime">5:00</span> | Čierny: <span id="blackTime">5:00</span></div>
+  <div id="board" style="width: 400px"></div>
+
+  <div class="controls">
+    <button id="undoButton">Späť</button>
+    <button id="redoButton" disabled>Vpred</button>
+    <button id="resetButton">Reštartovať hru</button>
+    <button id="playAiButton">Hrať proti AI</button>
+  </div>
+
+  <script src="https://unpkg.com/chessboard-js@1.0.0/js/chessboard-1.0.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script>
+    var board = null;
+    var game = new Chess();
+    var undoStack = [];
+    var redoStack = [];
+    var aiEnabled = false;
+    var timer = {
+      white: 300,
+      black: 300
+    };
+    var timerInterval;
+
+    // Zvýraznenie posledného ťahu
+    function highlightMove(source, target) {
+      var squares = document.querySelectorAll('.square-55d63');
+      squares.forEach(sq => sq.style.backgroundColor = '');
+
+      document.querySelector(`.square-${source}`).style.backgroundColor = '#f39c12';
+      document.querySelector(`.square-${target}`).style.backgroundColor = '#f39c12';
+    }
+
+    function onDragStart(source, piece) {
+      if (game.game_over() || (game.turn() === 'w' && piece.search(/^b/) !== -1) || (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+        return false;
+      }
+    }
+
+    function onDrop(source, target) {
+      var move = game.move({
+        from: source,
+        to: target,
+        promotion: 'q' // always promote to queen
+      });
+
+      if (move === null) return 'snapback';
+
+      undoStack.push(move);
+      redoStack = [];
+      document.getElementById('redoButton').disabled = true;
+      highlightMove(source, target);
+      updateStatus();
+
+      // Ak je AI zapnuté, nechá AI odpovedať
+      if (aiEnabled && game.turn() === 'b') {
+        setTimeout(() => {
+          makeAiMove();
+        }, 500);
+      }
+    }
+
+    function updateStatus() {
+      var status = '';
+
+      var moveColor = game.turn() === 'w' ? 'Biely' : 'Čierny';
+
+      if (game.in_checkmate()) {
+        status = 'Koniec hry, ' + moveColor + ' prehral.';
+      } else if (game.in_draw()) {
+        status = 'Remíza.';
+      } else {
+        status = moveColor + ' na ťahu';
+
+        if (game.in_check()) {
+          status += ', šach!';
+        }
+      }
+
+      document.getElementById('status').innerHTML = status;
+    }
+
+    function onSnapEnd() {
+      board.position(game.fen());
+    }
+
+    var config = {
+      draggable: true,
+      position: 'start',
+      onDragStart: onDragStart,
+      onDrop: onDrop,
+      onSnapEnd: onSnapEnd
+    };
+
+    board = Chessboard('board', config);
+
+    // Časomiera
+    function startTimer() {
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (game.turn() === 'w') {
+          timer.white--;
+          updateTimerDisplay('white');
+        } else {
+          timer.black--;
+          updateTimerDisplay('black');
+        }
+        if (timer.white <= 0 || timer.black <= 0) {
+          clearInterval(timerInterval);
+          document.getElementById('status').innerText = 'Čas vypršal, hra končí!';
+        }
+      }, 1000);
+    }
+
+    function updateTimerDisplay(player) {
+      var minutes = Math.floor(timer[player] / 60);
+      var seconds = timer[player] % 60;
+      document.getElementById(`${player}Time`).innerText = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    }
+
+    // AI hody (jednoduchý algoritmus náhodných ťahov)
+    function makeAiMove() {
+      var moves = game.ugly_moves();
+      var randomMove = moves[Math.floor(Math.random() * moves.length)];
+      game.move(randomMove);
+      board.position(game.fen());
+      highlightMove(randomMove.from, randomMove.to);
+      updateStatus();
+    }
+
+    // Funkcia pre tlačidlá
+    document.getElementById('resetButton').addEventListener('click', function() {
+      game.reset();
+      board.start();
+      undoStack = [];
+      redoStack = [];
+      timer.white = 300;
+      timer.black = 300;
+      updateTimerDisplay('white');
+      updateTimerDisplay('black');
+      startTimer();
+      updateStatus();
+    });
+
+    document.getElementById('playAiButton').addEventListener('click', function() {
+      aiEnabled = !aiEnabled;
+      document.getElementById('playAiButton').innerText = aiEnabled ? 'Hrať bez AI' : 'Hrať proti AI';
+      if (aiEnabled && game.turn() === 'b') {
+        makeAiMove();
+      }
+    });
+
+    updateStatus();
+    startTimer();
+  </script>
+
+</body>
+</html>
